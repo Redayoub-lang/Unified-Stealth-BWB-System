@@ -2,6 +2,7 @@ import asyncio
 import json
 import cv2
 import base64
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import uvicorn
