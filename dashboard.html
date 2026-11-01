@@ -125,6 +125,47 @@
             renderer.render(scene, camera);
         }
         animate();
+        ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    const telem = data.telemetry || {};
+    
+    // Formatage sécurisé avec conversion en Nombre avant .toFixed(1)
+    const airspeed = Number(telem.airspeed || 0).toFixed(1);
+    const altitude = Number(telem.altitude || 0).toFixed(1);
+    const rcs = Number(telem.rcs_dBsm || -24.0).toFixed(1);
+    const battery = Number(telem.battery_pct || 100).toFixed(0);
+
+    // Mise à jour de l'affichage HUD
+    document.getElementById('mode').innerText = data.mode || "--";
+    document.getElementById('spd').innerText = `${airspeed} m/s`;
+    document.getElementById('alt').innerText = `${altitude} m`;
+    document.getElementById('rcs').innerText = `${rcs} dBsm`;
+    document.getElementById('bat').innerText = `${battery}%`;
+
+    if (data.target_wp) {
+        document.getElementById('wp').innerText = `[${data.target_wp[0]}, ${data.target_wp[1]}]`;
+    }
+
+    // Mise à jour 3D du drone
+    if (telem.position && telem.euler) {
+        droneGroup.position.set(telem.position[0], -telem.position[2], telem.position[1]);
+        droneGroup.rotation.set(
+            THREE.MathUtils.degToRad(telem.euler[0]),
+            THREE.MathUtils.degToRad(-telem.euler[2]),
+            THREE.MathUtils.degToRad(telem.euler[1])
+        );
+
+        camera.position.x = droneGroup.position.x - 80 * Math.sin(droneGroup.rotation.y);
+        camera.position.z = droneGroup.position.z - 80 * Math.cos(droneGroup.rotation.y);
+        camera.position.y = droneGroup.position.y + 40;
+        camera.lookAt(droneGroup.position);
+    }
+
+    // Flux vidéo
+    if (data.frame) {
+        document.getElementById('cam-feed').src = "data:image/jpeg;base64," + data.frame;
+    }
+};
     </script>
 </body>
 </html>
