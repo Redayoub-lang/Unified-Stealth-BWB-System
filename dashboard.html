@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stealth BWB Autonomous C2</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050b14; font-family: 'Courier New', monospace; color: #00ffcc; }
+        #hud { position: absolute; top: 15px; left: 15px; background: rgba(5, 15, 25, 0.85); border: 1px solid #00ffcc; padding: 15px; border-radius: 6px; width: 280px; box-shadow: 0 0 15px rgba(0,255,204,0.2); }
+        .hud-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
+        .val { font-weight: bold; color: #ffffff; }
+        .btn-group { margin-top: 12px; display: flex; gap: 5px; flex-wrap: wrap; }
+        button { background: #003344; color: #00ffcc; border: 1px solid #00ffcc; padding: 6px 10px; cursor: pointer; font-family: inherit; font-size: 11px; border-radius: 3px; }
+        button:hover { background: #00ffcc; color: #000; }
+        #video-container { position: absolute; bottom: 15px; right: 15px; width: 280px; height: 185px; border: 1px solid #00ffcc; background: #000; border-radius: 4px; overflow: hidden; }
+        #cam-feed { width: 100%; height: 100%; object-fit: cover; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="hud">
+        <h3 style="margin:0 0 10px 0; font-size:14px; text-align:center;">⚡ STEALTH BWB COMMAND CENTER</h3>
+        <div class="hud-row"><span>STATUS:</span><span id="st" class="val">CONNECTING...</span></div>
+        <div class="hud-row"><span>FLIGHT MODE:</span><span id="mode" class="val">--</span></div>
+        <div class="hud-row"><span>AIRSPEED:</span><span id="spd" class="val">0.0 m/s</span></div>
+        <div class="hud-row"><span>ALTITUDE:</span><span id="alt" class="val">0.0 m</span></div>
+        <div class="hud-row"><span>TARGET WP:</span><span id="wp" class="val">NONE</span></div>
+        <div class="hud-row"><span>RCS:</span><span id="rcs" class="val">-24.0 dBsm</span></div>
+        <div class="hud-row"><span>BATTERY:</span><span id="bat" class="val">100%</span></div>
+
+        <div class="btn-group">
+            <button onclick="setMode('TAKEOFF')">TAKEOFF</button>
+            <button onclick="setMode('CRUISE')">CRUISE</button>
+            <button onclick="setMode('NAV_AUTO')">AUTO NAV</button>
+            <button onclick="setMode('GLIDE')">GLIDE</button>
+        </div>
+    </div>
+
+    <div id="video-container">
+        <img id="cam-feed" src="" alt="Live Optical Feed">
+    </div>
+
+    <script>
+        // Three.js Scene Setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Grid & Lights
+        const grid = new THREE.GridHelper(2000, 50, 0x00ffcc, 0x002233);
+        scene.add(grid);
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(100, 300, 100);
+        scene.add(light);
+
+        // Stealth BWB Drone Mesh representation
+        const droneGroup = new THREE.Group();
+        const bodyGeo = new THREE.ConeGeometry(8, 20, 3);
+        bodyGeo.rotateX(Math.PI / 2);
+        const mat = new THREE.MeshPhongMaterial({ color: 0x00e5ff, wireframe: true });
+        const droneMesh = new THREE.Mesh(bodyGeo, mat);
+        droneGroup.add(droneMesh);
+        scene.add(droneGroup);
+
+        // Waypoints visualization group
+        const wpGroup = new THREE.Group();
+        scene.add(wpGroup);
+
+        camera.position.set(0, 150, 300);
+
+        // WebSocket Telemetry Connection
+        const ws = new WebSocket(`ws://${location.host}/ws/telemetry`);
+        
+        ws.onopen = () => { document.getElementById('st').innerText = "LIVE ONLINE"; };
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const telem = data.telemetry;
+            
+            // Update Telemetry HUD
+            document.getElementById('mode').innerText = data.mode;
+            document.getElementById('spd').innerText = telem.airspeed.toFixed(1) + " m/s";
+            document.getElementById('alt').innerText = telem.altitude.toFixed(1) + " m";
+            document.getElementById('rcs').innerText = telem.rcs_dBsm.toFixed(2) + " dBsm";
+            document.getElementById('bat').innerText = telem.battery_pct.toFixed(1) + "%";
+
+            if (data.target_wp) {
+                document.getElementById('wp').innerText = `[${data.target_wp[0]}, ${data.target_wp[1]}]`;
+            }
+
+            // Update Drone Position & Attitude in 3D
+            droneGroup.position.set(telem.position[0], -telem.position[2], telem.position[1]);
+            droneGroup.rotation.set(
+                THREE.MathUtils.degToRad(telem.euler[0]),
+                THREE.MathUtils.degToRad(-telem.euler[2]),
+                THREE.MathUtils.degToRad(telem.euler[1])
+            );
+
+            // Dynamic Camera Follow
+            camera.position.x = droneGroup.position.x - 80 * Math.sin(droneGroup.rotation.y);
+            camera.position.z = droneGroup.position.z - 80 * Math.cos(droneGroup.rotation.y);
+            camera.position.y = droneGroup.position.y + 40;
+            camera.lookAt(droneGroup.position);
+
+            // Update Camera Feed
+            if (data.frame) {
+                document.getElementById('cam-feed').src = "data:image/jpeg;base64," + data.frame;
+            }
+        };
+
+        function setMode(mode) {
+            ws.send(JSON.stringify({ "command": mode }));
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
