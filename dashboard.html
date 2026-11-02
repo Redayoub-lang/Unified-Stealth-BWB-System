@@ -2,170 +2,159 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stealth BWB Autonomous C2</title>
+    <title>Stealth BWB Dynamic C2 Dashboard</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #050b14; font-family: 'Courier New', monospace; color: #00ffcc; }
-        #hud { position: absolute; top: 15px; left: 15px; background: rgba(5, 15, 25, 0.85); border: 1px solid #00ffcc; padding: 15px; border-radius: 6px; width: 280px; box-shadow: 0 0 15px rgba(0,255,204,0.2); }
+        #hud { position: absolute; top: 15px; left: 15px; background: rgba(5, 15, 25, 0.85); border: 1px solid #00ffcc; padding: 15px; border-radius: 6px; width: 290px; }
         .hud-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
         .val { font-weight: bold; color: #ffffff; }
-        .btn-group { margin-top: 12px; display: flex; gap: 5px; flex-wrap: wrap; }
-        button { background: #003344; color: #00ffcc; border: 1px solid #00ffcc; padding: 6px 10px; cursor: pointer; font-family: inherit; font-size: 11px; border-radius: 3px; }
+        .btn-group { margin-top: 12px; display: flex; gap: 4px; flex-wrap: wrap; }
+        button { background: #003344; color: #00ffcc; border: 1px solid #00ffcc; padding: 6px 8px; cursor: pointer; font-size: 11px; border-radius: 3px; }
         button:hover { background: #00ffcc; color: #000; }
-        #video-container { position: absolute; bottom: 15px; right: 15px; width: 280px; height: 185px; border: 1px solid #00ffcc; background: #000; border-radius: 4px; overflow: hidden; }
+        #video-container { position: absolute; bottom: 15px; right: 15px; width: 280px; height: 185px; border: 1px solid #00ffcc; background: #000; }
         #cam-feed { width: 100%; height: 100%; object-fit: cover; }
+        #hint { position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.7); border: 1px dashed #00ffcc; padding: 8px 12px; font-size: 11px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
     <div id="hud">
-        <h3 style="margin:0 0 10px 0; font-size:14px; text-align:center;">⚡ STEALTH BWB COMMAND CENTER</h3>
+        <h3 style="margin:0 0 10px 0; font-size:14px; text-align:center;">⚡ STEALTH BWB ADVANCED C2</h3>
         <div class="hud-row"><span>STATUS:</span><span id="st" class="val">CONNECTING...</span></div>
         <div class="hud-row"><span>FLIGHT MODE:</span><span id="mode" class="val">--</span></div>
         <div class="hud-row"><span>AIRSPEED:</span><span id="spd" class="val">0.0 m/s</span></div>
         <div class="hud-row"><span>ALTITUDE:</span><span id="alt" class="val">0.0 m</span></div>
+        <div class="hud-row"><span>RCS (DYNAMIC):</span><span id="rcs" class="val">-26.0 dBsm</span></div>
         <div class="hud-row"><span>TARGET WP:</span><span id="wp" class="val">NONE</span></div>
-        <div class="hud-row"><span>RCS:</span><span id="rcs" class="val">-24.0 dBsm</span></div>
-        <div class="hud-row"><span>BATTERY:</span><span id="bat" class="val">100%</span></div>
 
         <div class="btn-group">
             <button onclick="setMode('TAKEOFF')">TAKEOFF</button>
             <button onclick="setMode('CRUISE')">CRUISE</button>
             <button onclick="setMode('NAV_AUTO')">AUTO NAV</button>
-            <button onclick="setMode('GLIDE')">GLIDE</button>
+            <button onclick="clearWaypoints()">CLEAR WPs</button>
         </div>
     </div>
 
+    <div id="hint">🖱️ CLIQUEZ SUR LA CARTE POUR AJOUTER UN WAYPOINT 3D</div>
+
     <div id="video-container">
-        <img id="cam-feed" src="" alt="Live Optical Feed">
+        <img id="cam-feed" src="" alt="Live Feed">
     </div>
 
     <script>
-        // Three.js Scene Setup
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Grid & Lights
+        // Plan de détection pour le Raycaster
         const grid = new THREE.GridHelper(2000, 50, 0x00ffcc, 0x002233);
         scene.add(grid);
+        const planeGeo = new THREE.PlaneGeometry(2000, 2000);
+        planeGeo.rotateX(-Math.PI / 2);
+        const planeMat = new THREE.MeshBasicMaterial({ visible: false });
+        const groundPlane = new THREE.Mesh(planeGeo, planeMat);
+        scene.add(groundPlane);
+
         const light = new THREE.DirectionalLight(0xffffff, 1);
         light.position.set(100, 300, 100);
         scene.add(light);
 
-        // Stealth BWB Drone Mesh representation
+        // UAV Representation
         const droneGroup = new THREE.Group();
         const bodyGeo = new THREE.ConeGeometry(8, 20, 3);
         bodyGeo.rotateX(Math.PI / 2);
         const mat = new THREE.MeshPhongMaterial({ color: 0x00e5ff, wireframe: true });
-        const droneMesh = new THREE.Mesh(bodyGeo, mat);
-        droneGroup.add(droneMesh);
+        droneGroup.add(new THREE.Mesh(bodyGeo, mat));
         scene.add(droneGroup);
 
-        // Waypoints visualization group
-        const wpGroup = new THREE.Group();
-        scene.add(wpGroup);
+        // Waypoints Markers Group
+        const wpMarkersGroup = new THREE.Group();
+        scene.add(wpMarkersGroup);
 
-        camera.position.set(0, 150, 300);
+        camera.position.set(0, 250, 400);
+        camera.lookAt(0, 0, 0);
 
-        // WebSocket Telemetry Connection
         const ws = new WebSocket(`ws://${location.host}/ws/telemetry`);
-        
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Raycasting Clic de Souris
+        window.addEventListener('click', (event) => {
+            if (event.clientX < 320 && event.clientY < 260) return; // Ignorer le clic sur le HUD
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(groundPlane);
+
+            if (intersects.length > 0) {
+                const pt = intersects[0].point;
+                const targetAlt = -120.0; // Altitude de consigne par défaut
+
+                // Envoyer au serveur Python
+                ws.send(JSON.stringify({ "add_wp": [pt.x, pt.z, targetAlt] }));
+            }
+        });
+
         ws.onopen = () => { document.getElementById('st').innerText = "LIVE ONLINE"; };
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            const telem = data.telemetry;
+            const telem = data.telemetry || {};
             
-            // Update Telemetry HUD
-            document.getElementById('mode').innerText = data.mode;
-            document.getElementById('spd').innerText = telem.airspeed.toFixed(1) + " m/s";
-            document.getElementById('alt').innerText = telem.altitude.toFixed(1) + " m";
-            document.getElementById('rcs').innerText = telem.rcs_dBsm.toFixed(2) + " dBsm";
-            document.getElementById('bat').innerText = telem.battery_pct.toFixed(1) + "%";
+            document.getElementById('mode').innerText = data.mode || "--";
+            document.getElementById('spd').innerText = Number(telem.airspeed || 0).toFixed(1) + " m/s";
+            document.getElementById('alt').innerText = Number(telem.altitude || 0).toFixed(1) + " m";
+            document.getElementById('rcs').innerText = Number(telem.rcs_dBsm || -26.0).toFixed(1) + " dBsm";
 
             if (data.target_wp) {
-                document.getElementById('wp').innerText = `[${data.target_wp[0]}, ${data.target_wp[1]}]`;
+                document.getElementById('wp').innerText = `[${data.target_wp[0].toFixed(0)}, ${data.target_wp[1].toFixed(0)}]`;
             }
 
-            // Update Drone Position & Attitude in 3D
-            droneGroup.position.set(telem.position[0], -telem.position[2], telem.position[1]);
-            droneGroup.rotation.set(
-                THREE.MathUtils.degToRad(telem.euler[0]),
-                THREE.MathUtils.degToRad(-telem.euler[2]),
-                THREE.MathUtils.degToRad(telem.euler[1])
-            );
+            // Rendus des balises Waypoints dans la scène
+            if (data.waypoints) {
+                updateWaypointMarkers(data.waypoints);
+            }
 
-            // Dynamic Camera Follow
-            camera.position.x = droneGroup.position.x - 80 * Math.sin(droneGroup.rotation.y);
-            camera.position.z = droneGroup.position.z - 80 * Math.cos(droneGroup.rotation.y);
-            camera.position.y = droneGroup.position.y + 40;
-            camera.lookAt(droneGroup.position);
+            // Positionnement 3D
+            if (telem.position && telem.euler) {
+                droneGroup.position.set(telem.position[0], -telem.position[2], telem.position[1]);
+                droneGroup.rotation.set(
+                    THREE.MathUtils.degToRad(telem.euler[0]),
+                    THREE.MathUtils.degToRad(-telem.euler[2]),
+                    THREE.MathUtils.degToRad(telem.euler[1])
+                );
+            }
 
-            // Update Camera Feed
             if (data.frame) {
                 document.getElementById('cam-feed').src = "data:image/jpeg;base64," + data.frame;
             }
         };
 
-        function setMode(mode) {
-            ws.send(JSON.stringify({ "command": mode }));
+        function updateWaypointMarkers(wps) {
+            while (wpMarkersGroup.children.length > 0) {
+                wpMarkersGroup.remove(wpMarkersGroup.children[0]);
+            }
+            wps.forEach((wp, index) => {
+                const sphereGeo = new THREE.SphereGeometry(6, 16, 16);
+                const sphereMat = new THREE.MeshBasicMaterial({ color: index === 0 ? 0xff0055 : 0x00ffcc });
+                const marker = new THREE.Mesh(sphereGeo, sphereMat);
+                marker.position.set(wp[0], -wp[2], wp[1]);
+                wpMarkersGroup.add(marker);
+            });
         }
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+        function setMode(mode) { ws.send(JSON.stringify({ "command": mode })); }
+        function clearWaypoints() { ws.send(JSON.stringify({ "clear_wps": true })); }
 
         function animate() {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
         }
         animate();
-        ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    const telem = data.telemetry || {};
-    
-    // Formatage sécurisé avec conversion en Nombre avant .toFixed(1)
-    const airspeed = Number(telem.airspeed || 0).toFixed(1);
-    const altitude = Number(telem.altitude || 0).toFixed(1);
-    const rcs = Number(telem.rcs_dBsm || -24.0).toFixed(1);
-    const battery = Number(telem.battery_pct || 100).toFixed(0);
-
-    // Mise à jour de l'affichage HUD
-    document.getElementById('mode').innerText = data.mode || "--";
-    document.getElementById('spd').innerText = `${airspeed} m/s`;
-    document.getElementById('alt').innerText = `${altitude} m`;
-    document.getElementById('rcs').innerText = `${rcs} dBsm`;
-    document.getElementById('bat').innerText = `${battery}%`;
-
-    if (data.target_wp) {
-        document.getElementById('wp').innerText = `[${data.target_wp[0]}, ${data.target_wp[1]}]`;
-    }
-
-    // Mise à jour 3D du drone
-    if (telem.position && telem.euler) {
-        droneGroup.position.set(telem.position[0], -telem.position[2], telem.position[1]);
-        droneGroup.rotation.set(
-            THREE.MathUtils.degToRad(telem.euler[0]),
-            THREE.MathUtils.degToRad(-telem.euler[2]),
-            THREE.MathUtils.degToRad(telem.euler[1])
-        );
-
-        camera.position.x = droneGroup.position.x - 80 * Math.sin(droneGroup.rotation.y);
-        camera.position.z = droneGroup.position.z - 80 * Math.cos(droneGroup.rotation.y);
-        camera.position.y = droneGroup.position.y + 40;
-        camera.lookAt(droneGroup.position);
-    }
-
-    // Flux vidéo
-    if (data.frame) {
-        document.getElementById('cam-feed').src = "data:image/jpeg;base64," + data.frame;
-    }
-};
     </script>
 </body>
 </html>

@@ -21,10 +21,8 @@ flight_mode = "NAV_AUTO"
 
 @app.get("/")
 async def get_dashboard():
-    # كود HTML السابق مع إضافة وضع NAV_AUTO والنقاط
     with open("dashboard.html", "r", encoding="utf-8") as f:
-        html_content = f.read()
-    return HTMLResponse(content=html_content)
+        return HTMLResponse(content=f.read())
 
 
 @app.websocket("/ws/telemetry")
@@ -36,14 +34,23 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 raw_msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.001)
                 msg = json.loads(raw_msg)
+                
                 if "command" in msg:
                     flight_mode = msg["command"]
-                if "waypoints" in msg:
-                    autopilot.set_waypoints(msg["waypoints"])
+                
+                # Réception d'un nouveau waypoint depuis le tableau de bord 3D
+                if "add_wp" in msg:
+                    new_wp = msg["add_wp"] # [X, Y, Altitude]
+                    autopilot.waypoints.append(new_wp)
+                
+                # Réinitialisation de la trajectoire
+                if "clear_wps" in msg:
+                    autopilot.waypoints = []
+                    autopilot.current_wp_index = 0
             except asyncio.TimeoutError:
                 pass
 
-            # تفعيل التحكم
+            # Calculs du pilote automatique
             if flight_mode == "NAV_AUTO":
                 telemetry_preview = {
                     "position": uav.pos.tolist(),
@@ -62,7 +69,8 @@ async def websocket_endpoint(websocket: WebSocket):
             payload = {
                 "telemetry": telemetry_data,
                 "mode": flight_mode,
-                "target_wp": autopilot.waypoints[autopilot.current_wp_index] if autopilot.waypoints else None,
+                "waypoints": autopilot.waypoints,
+                "target_wp": autopilot.waypoints[autopilot.current_wp_index] if autopilot.waypoints and autopilot.current_wp_index < len(autopilot.waypoints) else None,
                 "frame": jpg_as_text
             }
 
