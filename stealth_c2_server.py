@@ -37,20 +37,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 if "command" in msg:
                     flight_mode = msg["command"]
-                
-                # Réception d'un nouveau waypoint depuis le tableau de bord 3D
                 if "add_wp" in msg:
-                    new_wp = msg["add_wp"] # [X, Y, Altitude]
-                    autopilot.waypoints.append(new_wp)
-                
-                # Réinitialisation de la trajectoire
+                    autopilot.waypoints.append(msg["add_wp"])
                 if "clear_wps" in msg:
                     autopilot.waypoints = []
                     autopilot.current_wp_index = 0
             except asyncio.TimeoutError:
                 pass
 
-            # Calculs du pilote automatique
             if flight_mode == "NAV_AUTO":
                 telemetry_preview = {
                     "position": uav.pos.tolist(),

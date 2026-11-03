@@ -2,31 +2,34 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Stealth BWB Dynamic C2 Dashboard</title>
+    <title>Stealth BWB Advanced Threat & C2 Center</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #050b14; font-family: 'Courier New', monospace; color: #00ffcc; }
-        #hud { position: absolute; top: 15px; left: 15px; background: rgba(5, 15, 25, 0.85); border: 1px solid #00ffcc; padding: 15px; border-radius: 6px; width: 290px; }
+        #hud { position: absolute; top: 15px; left: 15px; background: rgba(5, 15, 25, 0.9); border: 1px solid #00ffcc; padding: 15px; border-radius: 6px; width: 300px; z-index: 10; }
         .hud-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
         .val { font-weight: bold; color: #ffffff; }
+        .alert-safe { color: #00ffcc; font-weight: bold; }
+        .alert-danger { color: #ff0055; font-weight: bold; animation: blink 0.8s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
         .btn-group { margin-top: 12px; display: flex; gap: 4px; flex-wrap: wrap; }
         button { background: #003344; color: #00ffcc; border: 1px solid #00ffcc; padding: 6px 8px; cursor: pointer; font-size: 11px; border-radius: 3px; }
         button:hover { background: #00ffcc; color: #000; }
         #video-container { position: absolute; bottom: 15px; right: 15px; width: 280px; height: 185px; border: 1px solid #00ffcc; background: #000; }
         #cam-feed { width: 100%; height: 100%; object-fit: cover; }
-        #hint { position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.7); border: 1px dashed #00ffcc; padding: 8px 12px; font-size: 11px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
     <div id="hud">
-        <h3 style="margin:0 0 10px 0; font-size:14px; text-align:center;">⚡ STEALTH BWB ADVANCED C2</h3>
+        <h3 style="margin:0 0 10px 0; font-size:14px; text-align:center;">⚡ STEALTH BWB TACTICAL C2</h3>
         <div class="hud-row"><span>STATUS:</span><span id="st" class="val">CONNECTING...</span></div>
         <div class="hud-row"><span>FLIGHT MODE:</span><span id="mode" class="val">--</span></div>
         <div class="hud-row"><span>AIRSPEED:</span><span id="spd" class="val">0.0 m/s</span></div>
         <div class="hud-row"><span>ALTITUDE:</span><span id="alt" class="val">0.0 m</span></div>
-        <div class="hud-row"><span>RCS (DYNAMIC):</span><span id="rcs" class="val">-26.0 dBsm</span></div>
-        <div class="hud-row"><span>TARGET WP:</span><span id="wp" class="val">NONE</span></div>
+        <div class="hud-row"><span>DYNAMIC RCS:</span><span id="rcs" class="val">-26.0 dBsm</span></div>
+        <div class="hud-row"><span>RADAR DETECTION:</span><span id="threat-status" class="alert-safe">CLEAR</span></div>
+        <div class="hud-row"><span>SAM DISTANCE:</span><span id="sam-dist" class="val">0.0 m</span></div>
 
         <div class="btn-group">
             <button onclick="setMode('TAKEOFF')">TAKEOFF</button>
@@ -36,10 +39,8 @@
         </div>
     </div>
 
-    <div id="hint">🖱️ CLIQUEZ SUR LA CARTE POUR AJOUTER UN WAYPOINT 3D</div>
-
     <div id="video-container">
-        <img id="cam-feed" src="" alt="Live Feed">
+        <img id="cam-feed" src="" alt="Optical Feed">
     </div>
 
     <script>
@@ -49,30 +50,44 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Plan de détection pour le Raycaster
+        // Ground & Grid
         const grid = new THREE.GridHelper(2000, 50, 0x00ffcc, 0x002233);
         scene.add(grid);
+
         const planeGeo = new THREE.PlaneGeometry(2000, 2000);
         planeGeo.rotateX(-Math.PI / 2);
-        const planeMat = new THREE.MeshBasicMaterial({ visible: false });
-        const groundPlane = new THREE.Mesh(planeGeo, planeMat);
+        const groundPlane = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ visible: false }));
         scene.add(groundPlane);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(100, 300, 100);
-        scene.add(light);
+        scene.add(new THREE.DirectionalLight(0xffffff, 1));
 
-        // UAV Representation
+        // SAM Radar Threat Zone (Red Mesh Dome)
+        const radarDomeGeo = new THREE.SphereGeometry(180, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+        const radarDomeMat = new THREE.MeshBasicMaterial({ color: 0xff0044, wireframe: true, transparent: true, opacity: 0.25 });
+        const radarDome = new THREE.Mesh(radarDomeGeo, radarDomeMat);
+        radarDome.position.set(300, 0, 400);
+        scene.add(radarDome);
+
+        // UAV Mesh
         const droneGroup = new THREE.Group();
         const bodyGeo = new THREE.ConeGeometry(8, 20, 3);
         bodyGeo.rotateX(Math.PI / 2);
-        const mat = new THREE.MeshPhongMaterial({ color: 0x00e5ff, wireframe: true });
-        droneGroup.add(new THREE.Mesh(bodyGeo, mat));
+        droneGroup.add(new THREE.Mesh(bodyGeo, new THREE.MeshPhongMaterial({ color: 0x00e5ff, wireframe: true })));
         scene.add(droneGroup);
 
-        // Waypoints Markers Group
+        // Waypoints Marker Group
         const wpMarkersGroup = new THREE.Group();
         scene.add(wpMarkersGroup);
+
+        // Flight Trajectory Line (Trail)
+        const maxTrailPoints = 500;
+        const trailPositions = new Float32Array(maxTrailPoints * 3);
+        const trailGeometry = new THREE.BufferGeometry();
+        trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x00ffcc, linewidth: 2 });
+        const trailLine = new THREE.Line(trailGeometry, trailMaterial);
+        scene.add(trailLine);
+        let trailCount = 0;
 
         camera.position.set(0, 250, 400);
         camera.lookAt(0, 0, 0);
@@ -81,22 +96,16 @@
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
-        // Raycasting Clic de Souris
         window.addEventListener('click', (event) => {
-            if (event.clientX < 320 && event.clientY < 260) return; // Ignorer le clic sur le HUD
-
+            if (event.clientX < 330 && event.clientY < 280) return;
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObject(groundPlane);
 
             if (intersects.length > 0) {
                 const pt = intersects[0].point;
-                const targetAlt = -120.0; // Altitude de consigne par défaut
-
-                // Envoyer au serveur Python
-                ws.send(JSON.stringify({ "add_wp": [pt.x, pt.z, targetAlt] }));
+                ws.send(JSON.stringify({ "add_wp": [pt.x, pt.z, -120.0] }));
             }
         });
 
@@ -104,29 +113,47 @@
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             const telem = data.telemetry || {};
-            
+            const threat = telem.radar_threat || {};
+
             document.getElementById('mode').innerText = data.mode || "--";
             document.getElementById('spd').innerText = Number(telem.airspeed || 0).toFixed(1) + " m/s";
             document.getElementById('alt').innerText = Number(telem.altitude || 0).toFixed(1) + " m";
             document.getElementById('rcs').innerText = Number(telem.rcs_dBsm || -26.0).toFixed(1) + " dBsm";
+            document.getElementById('sam-dist').innerText = Number(threat.distance_to_radar || 0).toFixed(1) + " m";
 
-            if (data.target_wp) {
-                document.getElementById('wp').innerText = `[${data.target_wp[0].toFixed(0)}, ${data.target_wp[1].toFixed(0)}]`;
+            const threatElem = document.getElementById('threat-status');
+            if (threat.is_detected) {
+                threatElem.innerText = "WARNING: DETECTED!";
+                threatElem.className = "alert-danger";
+            } else {
+                threatElem.innerText = "STEALTH CLEAR";
+                threatElem.className = "alert-safe";
             }
 
-            // Rendus des balises Waypoints dans la scène
-            if (data.waypoints) {
-                updateWaypointMarkers(data.waypoints);
-            }
+            if (data.waypoints) updateWaypointMarkers(data.waypoints);
 
-            // Positionnement 3D
             if (telem.position && telem.euler) {
-                droneGroup.position.set(telem.position[0], -telem.position[2], telem.position[1]);
+                const posX = telem.position[0];
+                const posY = -telem.position[2];
+                const posZ = telem.position[1];
+
+                droneGroup.position.set(posX, posY, posZ);
                 droneGroup.rotation.set(
                     THREE.MathUtils.degToRad(telem.euler[0]),
                     THREE.MathUtils.degToRad(-telem.euler[2]),
                     THREE.MathUtils.degToRad(telem.euler[1])
                 );
+
+                // Update Trajectory Trail
+                if (trailCount < maxTrailPoints) {
+                    const positions = trailLine.geometry.attributes.position.array;
+                    positions[trailCount * 3] = posX;
+                    positions[trailCount * 3 + 1] = posY;
+                    positions[trailCount * 3 + 2] = posZ;
+                    trailCount++;
+                    trailLine.geometry.setDrawRange(0, trailCount);
+                    trailLine.geometry.attributes.position.needsUpdate = true;
+                }
             }
 
             if (data.frame) {
@@ -135,13 +162,12 @@
         };
 
         function updateWaypointMarkers(wps) {
-            while (wpMarkersGroup.children.length > 0) {
-                wpMarkersGroup.remove(wpMarkersGroup.children[0]);
-            }
+            while (wpMarkersGroup.children.length > 0) wpMarkersGroup.remove(wpMarkersGroup.children[0]);
             wps.forEach((wp, index) => {
-                const sphereGeo = new THREE.SphereGeometry(6, 16, 16);
-                const sphereMat = new THREE.MeshBasicMaterial({ color: index === 0 ? 0xff0055 : 0x00ffcc });
-                const marker = new THREE.Mesh(sphereGeo, sphereMat);
+                const marker = new THREE.Mesh(
+                    new THREE.SphereGeometry(6, 16, 16),
+                    new THREE.MeshBasicMaterial({ color: index === 0 ? 0xff0055 : 0x00ffcc })
+                );
                 marker.position.set(wp[0], -wp[2], wp[1]);
                 wpMarkersGroup.add(marker);
             });
