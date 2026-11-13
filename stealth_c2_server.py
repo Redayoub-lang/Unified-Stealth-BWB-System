@@ -13,18 +13,21 @@ from camera_vision_system import UAVVisionSystem
 from stealth_autopilot import StealthAutopilot
 from stealth_bwb_physics import StealthBWBPhysics
 
-# تهيئة مكونات النظام الأساسية
-DT = 0.03  # معدل التحديث 33.3 Hz
+DT = 0.03
+COMMS_TIMEOUT_SEC = 5.0  # مهلة فقدان الاتصال بالمحطة الأرضية قبل تفعيل RTL تلقائياً
+
 uav = StealthBWBPhysics(dt=DT)
 vision = UAVVisionSystem()
 autopilot = StealthAutopilot(stealth_mode=True)
 
 flight_mode = "NAV_AUTO"
 latest_payload_json = ""
+gcs_ever_connected = False
+last_gcs_seen = 0.0
 
 
 class ConnectionManager:
-    """إدارة اتصالات WebSocket المتعددة (لوحة القيادة + جسر ROS 2) بأمان."""
+    """إدارة اتصالات WebSocket المتعددة (لوحة القيادة + جسر ROS 2 + جسر MAVLink)."""
 
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -54,16 +57,21 @@ manager = ConnectionManager()
 
 
 async def flight_control_loop():
-    """
-    حلقة التحكم الرئيسية المستقلة (33 Hz):
-    تُحدّث الفيزياء، الطيار الآلي، والرؤية الحاسوبية، ثم تبث الحزمة لجميع العملاء.
-    """
-    global flight_mode, latest_payload_json
+    """حلقة التحكم الرئيسية المستقلة (33 Hz) مع مراقبة فقدان الاتصال."""
+    global flight_mode, latest_payload_json, last_gcs_seen
 
     while True:
-        loop_start = asyncio.get_event_loop().time()
+        now = asyncio.get_event_loop().time()
 
-        # 1. حساب أوامر التحكم بناءً على وضع الطيران الحالي
+        # 1. مراقبة فقدان الاتصال (Comms Loss Failsafe)
+        if manager.active_connections:
+            last_gcs_seen = now
+        elif gcs_ever_connected and uav.pos[2] < -10.0:
+            if (now - last_gcs_seen) > COMMS_TIMEOUT_SEC and not autopilot.rtl_triggered:
+                autopilot.trigger_rtl(reason="COMMS_LOSS")
+                flight_mode = "RTL"
+
+        # 2. حساب أوامر الطيار الآلي أو وضع الطيران اليدوي
         if flight_mode in ("NAV_AUTO", "RTL"):
             telemetry_preview = {
                 "position": uav.pos.tolist(),
@@ -73,7 +81,6 @@ async def flight_control_loop():
             }
             e_left, e_right, t_cmd = autopilot.compute_control_surface_commands(telemetry_preview, dt=DT)
 
-            # تحديث وضع العرض تلقائياً إذا فعّل الطيار الآلي العودة الاضطرارية للبطارية
             if autopilot.rtl_triggered and flight_mode != "RTL":
                 flight_mode = "RTL"
 
@@ -82,26 +89,21 @@ async def flight_control_loop():
                 delta_elevon_right=e_right,
                 delta_thrust=t_cmd
             )
-
         elif flight_mode == "TAKEOFF":
-            # دفع مرتفع مع زاوية صعود تدريجية حتى الوصول لارتفاع آمن (50 متر)
             telemetry_data = uav.step(delta_elevon_left=0.14, delta_elevon_right=0.14, delta_thrust=0.85)
             if telemetry_data["altitude"] >= 50.0:
                 flight_mode = "NAV_AUTO"
-
         elif flight_mode == "GLIDE":
-            # انزلاق هوائي بدون دفع (إيقاف المحرك)
             telemetry_data = uav.step(delta_elevon_left=0.02, delta_elevon_right=0.02, delta_thrust=0.0)
-
-        else:  # وضع الإبحار الثابت CRUISE / HOLD
+        else:
             telemetry_data = uav.step(delta_elevon_left=0.0, delta_elevon_right=0.0, delta_thrust=0.45)
 
-        # 2. معالجة إطار الكاميرا وضغطه بجودة متوازنة لتقليل تأخير البث (Low Latency)
+        # 3. معالجة إطار الكاميرا (Non-Blocking)
         frame = vision.process_frame(telemetry_data)
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         jpg_as_text = base64.b64encode(buffer).decode('utf-8')
 
-        # 3. تجهيز حزمة البيانات الموحدة (متوافقة 100% مع dashboard.html و ROS 2)
+        # 4. تجهيز وبث حزمة القياس الموحدة
         target_wp = (
             autopilot.waypoints[autopilot.current_wp_index]
             if autopilot.waypoints and autopilot.current_wp_index < len(autopilot.waypoints)
@@ -113,23 +115,20 @@ async def flight_control_loop():
         payload = {
             "telemetry": telemetry_data,
             "mode": flight_mode,
+            "failsafe_reason": autopilot.failsafe_reason,
             "waypoints": autopilot.waypoints,
             "target_wp": target_wp,
             "frame": jpg_as_text
         }
         latest_payload_json = json.dumps(payload)
-
-        # 4. بث البيانات لجميع الواجهات المتصلة
         await manager.broadcast(latest_payload_json)
 
-        # الحفاظ على دقة التوقيت 33 Hz
-        elapsed = asyncio.get_event_loop().time() - loop_start
+        elapsed = asyncio.get_event_loop().time() - now
         await asyncio.sleep(max(0.001, DT - elapsed))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """إدارة بدء وإيقاف حلقة الطيران وتحرير الكاميرا بأمان عند إغلاق السيرفر."""
     task = asyncio.create_task(flight_control_loop())
     yield
     task.cancel()
@@ -147,11 +146,15 @@ async def get_dashboard():
 
 @app.websocket("/ws/telemetry")
 async def websocket_endpoint(websocket: WebSocket):
-    global flight_mode, uav, autopilot
+    global flight_mode, uav, autopilot, gcs_ever_connected, last_gcs_seen
     await manager.connect(websocket)
+    gcs_ever_connected = True
+    last_gcs_seen = asyncio.get_event_loop().time()
+
     try:
         while True:
             raw_msg = await websocket.receive_text()
+            last_gcs_seen = asyncio.get_event_loop().time()
             try:
                 msg = json.loads(raw_msg)
             except json.JSONDecodeError:
@@ -160,14 +163,14 @@ async def websocket_endpoint(websocket: WebSocket):
             if "command" in msg:
                 cmd = str(msg["command"]).upper()
                 if cmd == "RTL":
-                    autopilot.trigger_rtl()
+                    autopilot.trigger_rtl(reason="MANUAL_RTL")
                     flight_mode = "RTL"
                 elif cmd == "RESET":
                     uav = StealthBWBPhysics(dt=DT)
                     autopilot = StealthAutopilot(stealth_mode=autopilot.stealth_mode)
                     flight_mode = "NAV_AUTO"
                 else:
-                    autopilot.rtl_triggered = False
+                    autopilot.clear_failsafe()
                     flight_mode = cmd
 
             if "stealth_mode" in msg:
