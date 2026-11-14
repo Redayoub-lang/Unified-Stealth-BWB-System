@@ -2,195 +2,328 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Stealth BWB Advanced Threat & C2 Center</title>
+    <title>Stealth BWB Advanced Threat & Tactical C2</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050b14; font-family: 'Courier New', monospace; color: #00ffcc; }
-        #hud { position: absolute; top: 15px; left: 15px; background: rgba(5, 15, 25, 0.92); border: 1px solid #00ffcc; padding: 15px; border-radius: 6px; width: 310px; z-index: 10; box-shadow: 0 0 15px rgba(0, 255, 204, 0.15); }
-        .hud-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
-        .val { font-weight: bold; color: #ffffff; }
-        .alert-safe { color: #00ffcc; font-weight: bold; }
-        .alert-warn { color: #ffaa00; font-weight: bold; }
-        .alert-danger { color: #ff0055; font-weight: bold; animation: blink 0.8s infinite; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
-        .btn-group { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-        button { background: #003344; color: #00ffcc; border: 1px solid #00ffcc; padding: 6px 6px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 11px; font-weight: bold; border-radius: 3px; transition: 0.15s; }
-        button:hover { background: #00ffcc; color: #000; }
-        button.btn-warn { border-color: #ffaa00; color: #ffaa00; background: #332200; }
-        button.btn-warn:hover { background: #ffaa00; color: #000; }
-        button.btn-danger { border-color: #ff0055; color: #ff0055; background: #330011; }
-        button.btn-danger:hover { background: #ff0055; color: #fff; }
-        .hint { margin-top: 10px; font-size: 11px; color: #6699aa; text-align: center; border-top: 1px solid #003344; padding-top: 6px; }
-        #video-container { position: absolute; bottom: 15px; right: 15px; width: 320px; height: 180px; border: 1px solid #00ffcc; background: #000; border-radius: 4px; overflow: hidden; z-index: 10; box-shadow: 0 0 15px rgba(0, 255, 204, 0.15); }
-        #cam-feed { width: 100%; height: 100%; object-fit: contain; display: block; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #03070c;
+            color: #00ffcc;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+        }
+        #hud-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 340px;
+            background: rgba(4, 14, 24, 0.88);
+            border: 1px solid #00ffcc;
+            border-radius: 8px;
+            padding: 16px;
+            z-index: 10;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.15);
+        }
+        .hud-title {
+            text-align: center;
+            font-size: 15px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-bottom: 14px;
+            color: #00ffcc;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 7px;
+            font-weight: bold;
+        }
+        .stat-label { color: #00e6b8; }
+        .alert-safe { color: #00ff88; }
+        .alert-warn { color: #ffaa00; }
+        .alert-danger { color: #ff3355; }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 14px;
+        }
+        button {
+            background: rgba(0, 45, 55, 0.85);
+            color: #00ffcc;
+            border: 1px solid #00ffcc;
+            border-radius: 4px;
+            padding: 8px 4px;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        button:hover { background: #00ffcc; color: #03070c; }
+        .btn-rtl {
+            background: rgba(80, 45, 0, 0.85);
+            border-color: #ffaa00;
+            color: #ffaa00;
+        }
+        .btn-rtl:hover { background: #ffaa00; color: #03070c; }
+        .btn-reset {
+            grid-column: span 3;
+            background: rgba(85, 10, 25, 0.85);
+            border-color: #ff3355;
+            color: #ff6680;
+            margin-top: 2px;
+        }
+        .btn-reset:hover { background: #ff3355; color: #ffffff; }
+
+        .hint-text {
+            text-align: center;
+            font-size: 11px;
+            color: #7f9eb2;
+            margin-top: 12px;
+            line-height: 1.4;
+        }
+
+        #video-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 340px;
+            height: 200px;
+            background: #02060a;
+            border: 1px solid #00ffcc;
+            border-radius: 6px;
+            overflow: hidden;
+            z-index: 10;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.15);
+        }
+        #video-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            display: block;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
 
-    <div id="hud">
-        <h3 style="margin:0 0 10px 0; font-size:14px; text-align:center; letter-spacing: 1px;">⚡ STEALTH BWB TACTICAL C2</h3>
-        <div class="hud-row"><span>STATUS:</span><span id="st" class="alert-warn">CONNECTING...</span></div>
-        <div class="hud-row"><span>FLIGHT MODE:</span><span id="mode" class="val">--</span></div>
-        <div class="hud-row"><span>AIRSPEED:</span><span id="spd" class="val">0.0 m/s</span></div>
-        <div class="hud-row"><span>ALTITUDE:</span><span id="alt" class="val">0.0 m</span></div>
-        <div class="hud-row"><span>DYNAMIC RCS:</span><span id="rcs" class="val">-26.0 dBsm</span></div>
-        <div class="hud-row"><span>RADAR DETECTION:</span><span id="threat-status" class="alert-safe">STEALTH CLEAR</span></div>
-        <div class="hud-row"><span>SAM DISTANCE:</span><span id="sam-dist" class="val">0.0 m</span></div>
-        <div class="hud-row"><span>BATTERY:</span><span id="bat" class="val">100.0%</span></div>
+    <div id="hud-panel">
+        <div class="hud-title">⚡ STEALTH BWB TACTICAL C2</div>
+        <div class="stat-row"><span class="stat-label">STATUS:</span><span id="conn-status" class="alert-warn">CONNECTING...</span></div>
+        <div class="stat-row"><span class="stat-label">FLIGHT MODE:</span><span id="flight-mode">--</span></div>
+        <div class="stat-row"><span class="stat-label">AIRSPEED:</span><span id="airspeed">0.0 m/s</span></div>
+        <div class="stat-row"><span class="stat-label">ALTITUDE:</span><span id="altitude">0.0 m</span></div>
+        <div class="stat-row"><span class="stat-label">DYNAMIC RCS:</span><span id="rcs-val">-26.0 dBsm</span></div>
+        <div class="stat-row"><span class="stat-label">RADAR DETECTION:</span><span id="threat-status" class="alert-safe">STEALTH CLEAR</span></div>
+        <div class="stat-row"><span class="stat-label">SAM DISTANCE:</span><span id="sam-dist">0.0 m</span></div>
+        <div class="stat-row"><span class="stat-label">BATTERY:</span><span id="battery">100.0%</span></div>
 
-        <div class="btn-group">
-            <button onclick="setMode('TAKEOFF')">TAKEOFF</button>
-            <button onclick="setMode('CRUISE')">CRUISE</button>
-            <button onclick="setMode('NAV_AUTO')">AUTO NAV</button>
-            <button id="stealth-btn" onclick="toggleStealth()">STEALTH: ON</button>
-            <button class="btn-warn" onclick="setMode('RTL')">RTL HOME</button>
+        <div class="btn-grid">
+            <button onclick="sendCommand('TAKEOFF')">TAKEOFF</button>
+            <button onclick="sendCommand('CRUISE')">CRUISE</button>
+            <button onclick="sendCommand('NAV_AUTO')">AUTO NAV</button>
+            <button id="btn-stealth" onclick="toggleStealth()">STEALTH: ON</button>
+            <button class="btn-rtl" onclick="sendCommand('RTL')">RTL HOME</button>
             <button onclick="clearWaypoints()">CLEAR WPs</button>
-            <button class="btn-danger" style="grid-column: span 3;" onclick="resetSimulation()">RESET MISSION</button>
+            <button class="btn-reset" onclick="sendCommand('RESET')">RESET MISSION</button>
         </div>
-        <div class="hint">Click anywhere on the 3D grid to add a Waypoint</div>
+
+        <div class="hint-text">Click anywhere on the 3D grid to add a Waypoint</div>
     </div>
 
     <div id="video-container">
-        <img id="cam-feed" src="" alt="Optical Feed">
+        <img id="video-feed" alt="Optical Feed" />
     </div>
 
     <script>
+        // 1. Initialisation de la scène 3D Three.js
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+        scene.fog = new THREE.FogExp2(0x03070c, 0.00045);
+
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 5000);
+        camera.position.set(-280, 260, -240);
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Ground & Grid
-        const grid = new THREE.GridHelper(2000, 50, 0x00ffcc, 0x002233);
-        scene.add(grid);
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.target.set(150, 40, 220);
 
-        const planeGeo = new THREE.PlaneGeometry(2000, 2000);
-        planeGeo.rotateX(-Math.PI / 2);
-        const groundPlane = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ visible: false }));
-        scene.add(groundPlane);
-
-        scene.add(new THREE.AmbientLight(0x404040, 1.5));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-        dirLight.position.set(200, 500, 300);
+        // Lumières
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const dirLight = new THREE.DirectionalLight(0x00ffcc, 0.9);
+        dirLight.position.set(200, 400, 200);
         scene.add(dirLight);
 
-        // SAM Radar Threat Zone (Red Mesh Dome)
-        const radarDomeGeo = new THREE.SphereGeometry(180, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-        const radarDomeMat = new THREE.MeshBasicMaterial({ color: 0xff0044, wireframe: true, transparent: true, opacity: 0.25 });
-        const radarDome = new THREE.Mesh(radarDomeGeo, radarDomeMat);
-        radarDome.position.set(300, 0, 400);
+        // Grille tactique au sol (2400m x 2400m)
+        const gridHelper = new THREE.GridHelper(2400, 48, 0x00ffcc, 0x0b2538);
+        scene.add(gridHelper);
+
+        // Plan invisible pour détecter les clics souris sur la grille
+        const groundPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(2400, 2400).rotateX(-Math.PI / 2),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        scene.add(groundPlane);
+
+        // 2. Site Radar SAM (300, 0, 400) + Zone de détection (180m) + Anneau d'évitement (275m)
+        const samPos = new THREE.Vector3(300, 0, 400);
+
+        const samTower = new THREE.Mesh(
+            new THREE.CylinderGeometry(4, 8, 22, 12),
+            new THREE.MeshBasicMaterial({ color: 0xff3355 })
+        );
+        samTower.position.set(samPos.x, 11, samPos.z);
+        scene.add(samTower);
+
+        const radarDome = new THREE.Mesh(
+            new THREE.SphereGeometry(180, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+            new THREE.MeshBasicMaterial({ color: 0xff2244, wireframe: true, transparent: true, opacity: 0.28 })
+        );
+        radarDome.position.copy(samPos);
         scene.add(radarDome);
-        // حزام الأمان لمناورة الالتفاف الذكي (275m Evasion Buffer)
-        const bufferRingGeo = new THREE.RingGeometry(273, 276, 64);
+
+        const bufferRingGeo = new THREE.RingGeometry(272, 276, 64);
         bufferRingGeo.rotateX(-Math.PI / 2);
         const bufferRing = new THREE.Mesh(
             bufferRingGeo,
-            new THREE.MeshBasicMaterial({ color: 0xffaa00, side: THREE.DoubleSide, transparent: true, opacity: 0.45 })
+            new THREE.MeshBasicMaterial({ color: 0xffaa00, side: THREE.DoubleSide, transparent: true, opacity: 0.5 })
         );
-        bufferRing.position.set(300, 0.5, 400);
+        bufferRing.position.set(samPos.x, 0.6, samPos.z);
         scene.add(bufferRing);
 
-        // BWB Flying-Wing 3D Mesh (Nose along +Z in local space)
-        const droneGroup = new THREE.Group();
-        droneGroup.rotation.order = 'YXZ'; // مطابقة ترتيب الدوران الفيزيائي: Yaw -> Pitch -> Roll
+        // 3. Modèle 3D de l'aile volante BWB
+        const bwbShape = new THREE.Shape();
+        bwbShape.moveTo(14, 0);
+        bwbShape.lineTo(-8, 24);
+        bwbShape.lineTo(-14, 22);
+        bwbShape.lineTo(-10, 5);
+        bwbShape.lineTo(-13, 0);
+        bwbShape.lineTo(-10, -5);
+        bwbShape.lineTo(-14, -22);
+        bwbShape.lineTo(-8, -24);
+        bwbShape.closePath();
 
-        const wingShape = new THREE.Shape();
-        wingShape.moveTo(0, 14);
-        wingShape.lineTo(18, -8);
-        wingShape.lineTo(6, -12);
-        wingShape.lineTo(0, -7);
-        wingShape.lineTo(-6, -12);
-        wingShape.lineTo(-18, -8);
-        wingShape.closePath();
-
-        const bwbGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 1.5, bevelEnabled: false });
+        const bwbGeo = new THREE.ExtrudeGeometry(bwbShape, { depth: 1.8, bevelEnabled: false });
         bwbGeo.rotateX(Math.PI / 2);
-        const bwbMesh = new THREE.Mesh(bwbGeo, new THREE.MeshBasicMaterial({ color: 0x00e5ff, wireframe: true }));
-        droneGroup.add(bwbMesh);
-        scene.add(droneGroup);
+        const uavMesh = new THREE.Mesh(
+            bwbGeo,
+            new THREE.MeshPhongMaterial({ color: 0x00ffcc, emissive: 0x004433, side: THREE.DoubleSide })
+        );
+        scene.add(uavMesh);
 
-        // Waypoints Marker Group
-        const wpMarkersGroup = new THREE.Group();
-        scene.add(wpMarkersGroup);
-
-        // Sliding Flight Trajectory Line (Trail)
-        const maxTrailPoints = 600;
-        const trailPositions = new Float32Array(maxTrailPoints * 3);
-        const trailGeometry = new THREE.BufferGeometry();
-        trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
-        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x00ffcc });
-        const trailLine = new THREE.Line(trailGeometry, trailMaterial);
+        // Traînée de trajectoire (Trail) et marqueurs de waypoints
+        const trailPoints = [];
+        const trailGeo = new THREE.BufferGeometry();
+        const trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x00ff88 }));
         scene.add(trailLine);
-        let trailCount = 0;
 
-        camera.position.set(0, 260, 420);
-        camera.lookAt(0, 0, 0);
+        const wpGroup = new THREE.Group();
+        scene.add(wpGroup);
+        let lastWpSignature = "";
 
-        // Waypoint Raycasting (Protected against HUD & Video clicks)
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
+        function updateWaypointsVisual(waypoints) {
+            const sig = JSON.stringify(waypoints || []);
+            if (sig === lastWpSignature) return;
+            lastWpSignature = sig;
 
-        window.addEventListener('click', (event) => {
-            if (event.target.closest('#hud') || event.target.closest('#video-container')) return;
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObject(groundPlane);
-
-            if (intersects.length > 0) {
-                const pt = intersects[0].point;
-                sendCommand({ "add_wp": [Number(pt.x.toFixed(1)), Number(pt.z.toFixed(1)), -120.0] });
+            while (wpGroup.children.length > 0) {
+                wpGroup.remove(wpGroup.children[0]);
             }
-        });
+            if (!waypoints || waypoints.length === 0) return;
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+            const linePts = [];
+            waypoints.forEach((wp) => {
+                const wx = wp[0];
+                const wy = Math.abs(wp[2]);
+                const wz = wp[1];
+                linePts.push(new THREE.Vector3(wx, wy, wz));
 
-        // WebSocket Connection with Auto-Reconnect
-        let ws = null;
-        let stealthEnabled = true;
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(5, 12, 12),
+                    new THREE.MeshBasicMaterial({ color: 0x00e5ff })
+                );
+                sphere.position.set(wx, wy, wz);
+                wpGroup.add(sphere);
 
-        function sendCommand(payload) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify(payload));
+                const stemGeo = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(wx, 0, wz),
+                    new THREE.Vector3(wx, wy, wz)
+                ]);
+                wpGroup.add(new THREE.Line(stemGeo, new THREE.LineBasicMaterial({ color: 0x007799 })));
+            });
+
+            if (linePts.length > 1) {
+                linePts.push(linePts[0].clone());
+                const pathGeo = new THREE.BufferGeometry().setFromPoints(linePts);
+                wpGroup.add(new THREE.Line(pathGeo, new THREE.LineBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.5 })));
             }
         }
 
+        // 4. Interaction clic souris sur la grille pour ajouter un Waypoint
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let downPos = { x: 0, y: 0 };
+
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+            downPos = { x: e.clientX, y: e.clientY };
+        });
+
+        renderer.domElement.addEventListener('pointerup', (e) => {
+            const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
+            if (moved > 5) return; // Ignorer si c'était une rotation caméra
+
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            const hits = raycaster.intersectObject(groundPlane);
+            if (hits.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+                const pt = hits[0].point;
+                ws.send(JSON.stringify({ add_wp: [Number(pt.x.toFixed(1)), Number(pt.z.toFixed(1)), -120.0] }));
+            }
+        });
+
+        // 5. Connexion WebSocket avec reconnexion automatique
+        let ws = null;
+        let stealthEnabled = true;
+
         function connectWebSocket() {
-            ws = new WebSocket(`ws://${location.host}/ws/telemetry`);
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${window.location.host}/ws/telemetry`);
 
             ws.onopen = () => {
-                const st = document.getElementById('st');
-                st.innerText = "LIVE ONLINE";
-                st.className = "alert-safe";
+                const statusEl = document.getElementById('conn-status');
+                statusEl.innerText = "LIVE ONLINE";
+                statusEl.className = "alert-safe";
             };
 
             ws.onclose = () => {
-                const st = document.getElementById('st');
-                st.innerText = "RECONNECTING...";
-                st.className = "alert-danger";
+                const statusEl = document.getElementById('conn-status');
+                statusEl.innerText = "RECONNECTING...";
+                statusEl.className = "alert-warn";
                 setTimeout(connectWebSocket, 1500);
             };
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                const telem = data.telemetry || {};
-                const threat = telem.radar_threat || {};
+                const tel = data.telemetry;
+                if (!tel) return;
 
-                document.getElementById('mode').innerText = data.mode || "--";
-                document.getElementById('spd').innerText = Number(telem.airspeed || 0).toFixed(1) + " m/s";
-                document.getElementById('alt').innerText = Number(telem.altitude || 0).toFixed(1) + " m";
-                document.getElementById('rcs').innerText = Number(telem.rcs_dBsm || -26.0).toFixed(1) + " dBsm";
-                document.getElementById('sam-dist').innerText = Number(threat.distance_to_radar || 0).toFixed(1) + " m";
+                const modeText = data.failsafe_reason ? `${data.mode} (${data.failsafe_reason})` : data.mode;
+                document.getElementById('flight-mode').innerText = modeText || "--";
+                document.getElementById('airspeed').innerText = `${Number(tel.airspeed || 0).toFixed(1)} m/s`;
+                document.getElementById('altitude').innerText = `${Number(tel.altitude || 0).toFixed(1)} m`;
+                document.getElementById('rcs-val').innerText = `${Number(tel.rcs_dBsm || -26).toFixed(1)} dBsm`;
+                document.getElementById('battery').innerText = `${Number(tel.battery_pct || 0).toFixed(1)}%`;
 
-                const batVal = Number(telem.battery_pct ?? 100.0);
-                const batElem = document.getElementById('bat');
-                batElem.innerText = batVal.toFixed(1) + "%";
-                batElem.className = batVal < 25.0 ? "alert-danger" : (batVal < 50.0 ? "alert-warn" : "val");
+                const threat = tel.radar_threat || {};
+                document.getElementById('sam-dist').innerText = `${Number(threat.distance_to_radar || 0).toFixed(1)} m`;
 
                 const threatElem = document.getElementById('threat-status');
                 if (threat.is_detected) {
@@ -203,94 +336,63 @@
                     threatElem.innerText = "STEALTH CLEAR";
                     threatElem.className = "alert-safe";
                 }
-                const threatElem = document.getElementById('threat-status');
-                if (threat.is_detected) {
-                    threatElem.innerText = "WARNING: DETECTED!";
-                    threatElem.className = "alert-danger";
-                } else {
-                    threatElem.innerText = "STEALTH CLEAR";
-                    threatElem.className = "alert-safe";
-                }
-
-                if (data.waypoints) updateWaypointMarkers(data.waypoints, data.target_wp);
-
-                if (telem.position && telem.euler) {
-                    const posX = telem.position[0];
-                    const posY = -telem.position[2];
-                    const posZ = telem.position[1];
-
-                    droneGroup.position.set(posX, posY, posZ);
-                    droneGroup.rotation.set(
-                        THREE.MathUtils.degToRad(-telem.euler[1]),               // Pitch
-                        THREE.MathUtils.degToRad(-telem.euler[2]) + Math.PI / 2,  // Yaw
-                        THREE.MathUtils.degToRad(-telem.euler[0])                // Roll
-                    );
-
-                    // Update Sliding Trajectory Trail
-                    const positions = trailLine.geometry.attributes.position.array;
-                    if (trailCount < maxTrailPoints) {
-                        positions[trailCount * 3] = posX;
-                        positions[trailCount * 3 + 1] = posY;
-                        positions[trailCount * 3 + 2] = posZ;
-                        trailCount++;
-                    } else {
-                        positions.copyWithin(0, 3);
-                        const lastIdx = (maxTrailPoints - 1) * 3;
-                        positions[lastIdx] = posX;
-                        positions[lastIdx + 1] = posY;
-                        positions[lastIdx + 2] = posZ;
-                    }
-                    trailLine.geometry.setDrawRange(0, trailCount);
-                    trailLine.geometry.attributes.position.needsUpdate = true;
-                }
 
                 if (data.frame) {
-                    document.getElementById('cam-feed').src = "data:image/jpeg;base64," + data.frame;
+                    document.getElementById('video-feed').src = `data:image/jpeg;base64,${data.frame}`;
                 }
+
+                // Mise à jour position et orientation 3D (NED -> Three.js)
+                const pos = tel.position || tel.pos || [0, 0, -60];
+                const euler = tel.euler || tel.euler_deg || [0, 0, 0];
+
+                uavMesh.position.set(pos[0], -pos[2], pos[1]);
+                uavMesh.rotation.order = 'YXZ';
+                uavMesh.rotation.y = -THREE.MathUtils.degToRad(euler[2]);
+                uavMesh.rotation.z = THREE.MathUtils.degToRad(euler[1]);
+                uavMesh.rotation.x = THREE.MathUtils.degToRad(euler[0]);
+
+                trailPoints.push(uavMesh.position.clone());
+                if (trailPoints.length > 220) trailPoints.shift();
+                trailGeo.setFromPoints(trailPoints);
+
+                updateWaypointsVisual(data.waypoints);
             };
         }
 
-        function updateWaypointMarkers(wps, targetWp) {
-            while (wpMarkersGroup.children.length > 0) {
-                wpMarkersGroup.remove(wpMarkersGroup.children[0]);
+        function sendCommand(cmd) {
+            if (cmd === 'RESET') {
+                trailPoints.length = 0;
+                trailGeo.setFromPoints(trailPoints);
             }
-
-            const renderList = [...wps];
-            if (targetWp && !renderList.some(wp => Math.abs(wp[0] - targetWp[0]) < 0.5 && Math.abs(wp[1] - targetWp[1]) < 0.5)) {
-                renderList.push(targetWp);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ command: cmd }));
             }
-
-            renderList.forEach((wp) => {
-                const isTarget = targetWp &&
-                    Math.abs(wp[0] - targetWp[0]) < 0.5 &&
-                    Math.abs(wp[1] - targetWp[1]) < 0.5;
-
-                const marker = new THREE.Mesh(
-                    new THREE.SphereGeometry(isTarget ? 8 : 5.5, 16, 16),
-                    new THREE.MeshBasicMaterial({ color: isTarget ? 0xff0055 : 0x00ffcc })
-                );
-                marker.position.set(wp[0], -wp[2], wp[1]);
-                wpMarkersGroup.add(marker);
-            });
         }
-
-        function setMode(mode) { sendCommand({ "command": mode }); }
-        function clearWaypoints() { sendCommand({ "clear_wps": true }); }
 
         function toggleStealth() {
             stealthEnabled = !stealthEnabled;
-            document.getElementById('stealth-btn').innerText = stealthEnabled ? "STEALTH: ON" : "STEALTH: OFF";
-            sendCommand({ "stealth_mode": stealthEnabled });
+            const btn = document.getElementById('btn-stealth');
+            btn.innerText = stealthEnabled ? "STEALTH: ON" : "STEALTH: OFF";
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ stealth_mode: stealthEnabled }));
+            }
         }
 
-        function resetSimulation() {
-            trailCount = 0;
-            trailLine.geometry.setDrawRange(0, 0);
-            sendCommand({ "command": "RESET" });
+        function clearWaypoints() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ clear_wps: true }));
+            }
         }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
 
         function animate() {
             requestAnimationFrame(animate);
+            controls.update();
             renderer.render(scene, camera);
         }
 
