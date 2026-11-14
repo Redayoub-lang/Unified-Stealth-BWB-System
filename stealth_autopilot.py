@@ -4,7 +4,7 @@ import numpy as np
 class StealthAutopilot:
     """
     نظام الطيار الآلي والملاحة الذاتية لطائرة BWB الشبكية
-    مع السياج الجغرافي (3D Geofence) وحماية مغلف الطيران والعودة التلقائية RTL.
+    مزود بخوارزمية تجنب الرادار المماسية (Tangential Radar Evasion) وتقييد البصمة الرادارية.
     """
 
     def __init__(self, stealth_mode: bool = True):
@@ -20,21 +20,29 @@ class StealthAutopilot:
         self.head_err_int = 0.0
         self.prev_head_err = 0.0
 
-        # قائمة نقاط المسار التكتيكية بنظام NED [(X_north, Y_east, Z_down)]
+        # قائمة نقاط المسار بنظام NED [(X_north, Y_east, Z_down)]
+        # المسار بين النقطة 1 و 2 يمر مباشرة فوق موقع رادار SAM [300, 400] لاختبار الالتفاف الذكي
         self.waypoints = [
-            [200.0, 300.0, -120.0],
-            [-300.0, 500.0, -150.0],
-            [-400.0, -200.0, -100.0],
+            [80.0, 100.0, -120.0],
+            [540.0, 640.0, -135.0],
+            [-260.0, 480.0, -130.0],
             [0.0, 0.0, -80.0]
         ]
         self.home_position = [0.0, 0.0, -60.0]
         self.current_wp_index = 0
         self.acceptance_radius = 35.0
 
+        # بيانات مواقع الرادارات المعادية (SAM Sites) وحزام الأمان
+        self.sam_sites = [
+            {"pos": np.array([300.0, 400.0, 0.0], dtype=np.float64), "radius": 180.0}
+        ]
+        self.evasion_margin = 95.0  # مسافة الأمان الإضافية حول قبة الرادار (180 + 95 = 275m)
+        self.radar_evasion_active = False
+
         # حدود السياج الجغرافي والأمان الميداني (Field Safety Geofence)
-        self.max_geofence_radius = 1200.0  # أقصى مسافة أفقية مسموحة من القاعدة (متر)
-        self.max_altitude = 300.0          # أقصى ارتفاع مسموح (متر)
-        self.min_battery_pct = 20.0        # عتبة البطارية للعودة الاضطرارية (%)
+        self.max_geofence_radius = 1200.0
+        self.max_altitude = 300.0
+        self.min_battery_pct = 20.0
 
         self.rtl_triggered = False
         self.failsafe_reason = None
@@ -70,6 +78,70 @@ class StealthAutopilot:
             return False
         return True
 
+    def _sanitize_waypoint_against_radars(self, target_wp: np.ndarray) -> np.ndarray:
+        """إزاحة نقطة المسار خارج نطاق الرادار إذا قام المستخدم بوضعها داخل منطقة الخطر."""
+        if not self.stealth_mode:
+            return target_wp
+
+        safe_wp = target_wp.copy()
+        for sam in self.sam_sites:
+            sam_xy = sam["pos"][:2]
+            safe_radius = sam["radius"] + 45.0
+            diff = safe_wp[:2] - sam_xy
+            dist = float(np.linalg.norm(diff))
+            if dist < safe_radius:
+                direction = diff / dist if dist > 1e-3 else np.array([-1.0, 0.0])
+                safe_wp[:2] = sam_xy + direction * safe_radius
+        return safe_wp
+
+    def _compute_evasive_heading(self, current_pos: np.ndarray, target_wp: np.ndarray) -> float:
+        """
+        حساب زاوية الاتجاه المثلى باستخدام الحقول الكامنة المماسية (Tangential Potential Field)
+        للالتفاف السلس حول قباب الرادار دون اختراقها.
+        """
+        pos_xy = current_pos[:2]
+        goal_xy = target_wp[:2]
+        vec_to_goal = goal_xy - pos_xy
+        dist_to_goal = float(np.linalg.norm(vec_to_goal))
+
+        if dist_to_goal < 1e-3:
+            return 0.0
+
+        u_goal = vec_to_goal / dist_to_goal
+        combined_dir = u_goal.copy()
+        evading = False
+
+        if self.stealth_mode:
+            for sam in self.sam_sites:
+                sam_xy = sam["pos"][:2]
+                radar_r = sam["radius"]
+                buffer_r = radar_r + self.evasion_margin
+
+                vec_from_radar = pos_xy - sam_xy
+                dist_to_radar = float(np.linalg.norm(vec_from_radar))
+
+                if dist_to_radar < buffer_r:
+                    evading = True
+                    u_rep = vec_from_radar / max(dist_to_radar, 1e-3)
+
+                    # حساب المتجهين المماسيين حول دائرة الرادار (يمين ويسار) واختيار الأقرب للهدف
+                    tangent_ccw = np.array([-u_rep[1], u_rep[0]], dtype=np.float64)
+                    tangent_cw = np.array([u_rep[1], -u_rep[0]], dtype=np.float64)
+                    best_tangent = (
+                        tangent_ccw
+                        if float(np.dot(tangent_ccw, u_goal)) >= float(np.dot(tangent_cw, u_goal))
+                        else tangent_cw
+                    )
+
+                    # تصعيد قوة المناورة كلما اقتربت الطائرة من حافة الكشف الراداري
+                    penetration = (buffer_r - dist_to_radar) / max(self.evasion_margin, 1.0)
+                    evasion_weight = float(np.clip(penetration, 0.0, 1.6))
+
+                    combined_dir += evasion_weight * (1.45 * best_tangent + 0.90 * u_rep)
+
+        self.radar_evasion_active = evading
+        return float(np.arctan2(combined_dir[1], combined_dir[0]))
+
     def compute_control_surface_commands(self, telemetry: dict, dt: float = 0.03) -> tuple[float, float, float]:
         """حساب أوامر أسطح التوجيه (Elevon Left, Elevon Right) ونسبة الدفع (Thrust)."""
         dt = max(float(dt), 1e-4)
@@ -87,24 +159,31 @@ class StealthAutopilot:
 
         self.check_geofence(current_pos)
 
-        # تحديد الهدف الحالي (القاعدة في حالة الطوارئ أو النقطة التالية في المسار)
+        # تحديد الهدف الحالي
         if self.rtl_triggered:
-            target_wp = np.array(self.home_position, dtype=np.float64)
+            raw_target = np.array(self.home_position, dtype=np.float64)
         elif not self.waypoints or self.current_wp_index >= len(self.waypoints):
+            self.radar_evasion_active = False
             return 0.0, 0.0, 0.45
         else:
-            target_wp = np.array(self.waypoints[self.current_wp_index], dtype=np.float64)
+            raw_target = np.array(self.waypoints[self.current_wp_index], dtype=np.float64)
+
+        target_wp = self._sanitize_waypoint_against_radars(raw_target)
 
         # 2. حساب المسافة الأفقية والتبديل للنقطة التالية عند الوصول
         horiz_dist = float(np.linalg.norm(target_wp[:2] - current_pos[:2]))
         if not self.rtl_triggered and horiz_dist < self.acceptance_radius:
             self.current_wp_index = (self.current_wp_index + 1) % len(self.waypoints)
-            target_wp = np.array(self.waypoints[self.current_wp_index], dtype=np.float64)
+            raw_target = np.array(self.waypoints[self.current_wp_index], dtype=np.float64)
+            target_wp = self._sanitize_waypoint_against_radars(raw_target)
             self.head_err_int = 0.0
             self.prev_head_err = 0.0
 
-        # 3. التحكم بالارتفاع (Altitude PID مع Anti-Windup)
+        # 3. التحكم بالارتفاع (Altitude PID مع خفض الارتفاع التكتيكي الطفيف أثناء التخفي)
         target_alt = abs(float(target_wp[2]))
+        if self.radar_evasion_active and self.stealth_mode:
+            target_alt = max(75.0, target_alt - 25.0)
+
         current_alt = abs(float(current_pos[2]))
         alt_error = target_alt - current_alt
 
@@ -119,10 +198,8 @@ class StealthAutopilot:
         )
         delta_elevator = float(np.clip(delta_elevator, -0.32, 0.32))
 
-        # 4. التحكم بالاتجاه (Heading PID)
-        dx = float(target_wp[0] - current_pos[0])
-        dy = float(target_wp[1] - current_pos[1])
-        target_heading = float(np.arctan2(dy, dx))
+        # 4. التحكم بالاتجاه عبر خوارزمية تجنب الرادار الذكية
+        target_heading = self._compute_evasive_heading(current_pos, target_wp)
 
         heading_error = target_heading - current_heading
         heading_error = float(np.arctan2(np.sin(heading_error), np.cos(heading_error)))
@@ -131,7 +208,14 @@ class StealthAutopilot:
         head_deriv = (heading_error - self.prev_head_err) / dt
         self.prev_head_err = heading_error
 
-        max_aileron = 0.18 if self.stealth_mode else 0.28
+        # تقييد زاوية الالتفاف أثناء المناورة حول الرادار للحفاظ على أقل بصمة رادارية (RCS)
+        if self.radar_evasion_active:
+            max_aileron = 0.13
+        elif self.stealth_mode:
+            max_aileron = 0.18
+        else:
+            max_aileron = 0.28
+
         delta_aileron = (
             self.kp_head * heading_error
             + self.ki_head * self.head_err_int
@@ -148,6 +232,6 @@ class StealthAutopilot:
         if current_alt < (target_alt - 10.0) or abs(heading_error) > 0.35:
             thrust_cmd = 0.65
         else:
-            thrust_cmd = 0.45
+            thrust_cmd = 0.48 if self.radar_evasion_active else 0.45
 
         return elevon_left, elevon_right, thrust_cmd

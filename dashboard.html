@@ -81,6 +81,15 @@
         const radarDome = new THREE.Mesh(radarDomeGeo, radarDomeMat);
         radarDome.position.set(300, 0, 400);
         scene.add(radarDome);
+        // حزام الأمان لمناورة الالتفاف الذكي (275m Evasion Buffer)
+        const bufferRingGeo = new THREE.RingGeometry(273, 276, 64);
+        bufferRingGeo.rotateX(-Math.PI / 2);
+        const bufferRing = new THREE.Mesh(
+            bufferRingGeo,
+            new THREE.MeshBasicMaterial({ color: 0xffaa00, side: THREE.DoubleSide, transparent: true, opacity: 0.45 })
+        );
+        bufferRing.position.set(300, 0.5, 400);
+        scene.add(bufferRing);
 
         // BWB Flying-Wing 3D Mesh (Nose along +Z in local space)
         const droneGroup = new THREE.Group();
@@ -183,6 +192,17 @@
                 batElem.innerText = batVal.toFixed(1) + "%";
                 batElem.className = batVal < 25.0 ? "alert-danger" : (batVal < 50.0 ? "alert-warn" : "val");
 
+                const threatElem = document.getElementById('threat-status');
+                if (threat.is_detected) {
+                    threatElem.innerText = "WARNING: DETECTED!";
+                    threatElem.className = "alert-danger";
+                } else if (data.evasion_active) {
+                    threatElem.innerText = "EVADING SAM RADAR";
+                    threatElem.className = "alert-warn";
+                } else {
+                    threatElem.innerText = "STEALTH CLEAR";
+                    threatElem.className = "alert-safe";
+                }
                 const threatElem = document.getElementById('threat-status');
                 if (threat.is_detected) {
                     threatElem.innerText = "WARNING: DETECTED!";
