@@ -142,7 +142,10 @@ app = FastAPI(title="Unified Stealth BWB C2 Server", lifespan=lifespan)
 async def get_dashboard():
     with open("dashboard.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
-
+@app.get("/wind-tunnel")
+async def get_wind_tunnel():
+    with open("wind_tunnel.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 @app.websocket("/ws/telemetry")
 async def websocket_endpoint(websocket: WebSocket):

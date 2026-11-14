@@ -9,7 +9,7 @@
         
         /* لوحة التحكم العلوية اليمنى */
         #controls-panel {
-            position: absolute; top: 15px; right: 15px; width: 320px;
+            position: absolute; top: 15px; right: 15px; width: 325px;
             background: rgba(10, 16, 28, 0.92); border: 1px solid #00ffcc;
             border-radius: 8px; padding: 14px; z-index: 10;
             box-shadow: 0 0 20px rgba(0, 255, 204, 0.12);
@@ -27,8 +27,13 @@
             transition: 0.2s;
         }
         button:hover, button.active { background: #00ffcc; color: #050b14; }
+        button.sync-btn {
+            width: 100%; margin-top: 8px; background: #064e3b; border-color: #10b981; color: #a7f3d0;
+        }
+        button.sync-btn:hover { background: #10b981; color: #050b14; }
+        #sync-status { font-size: 11px; text-align: center; margin-top: 5px; color: #38bdf8; min-height: 15px; }
 
-        /* لوحة القياسات الديناميكية الهوائية السفلية (مثل نفق الرياح) */
+        /* لوحة القياسات الديناميكية الهوائية السفلية */
         #aero-hud {
             position: absolute; bottom: 15px; right: 15px; width: 420px;
             background: rgba(10, 16, 28, 0.92); border: 1px solid #334155;
@@ -47,14 +52,14 @@
         .c-drag { color: #ff4466; }
         .c-wind { color: #38bdf8; }
 
-        /* لوحة الرسم البياني الحي للقوى والسرعة (يسار الشاشة) */
+        /* لوحة الرسم البياني الحي للقوى والسرعة (Auto-Scale) */
         #chart-panel {
-            position: absolute; bottom: 15px; left: 15px; width: 340px;
+            position: absolute; bottom: 15px; left: 15px; width: 350px;
             background: rgba(10, 16, 28, 0.92); border: 1px solid #334155;
             border-radius: 8px; padding: 12px; z-index: 10; direction: ltr;
         }
         .chart-title { font-size: 11px; color: #cbd5e1; margin-bottom: 6px; display: flex; justify-content: space-between; }
-        canvas#telemetryChart { width: 100%; height: 130px; background: #05080f; border: 1px solid #1e293b; border-radius: 4px; display: block; }
+        canvas#telemetryChart { width: 100%; height: 135px; background: #05080f; border: 1px solid #1e293b; border-radius: 4px; display: block; }
 
         /* مفتاح الألوان للمتجهات */
         #legend-box {
@@ -113,15 +118,18 @@
             <button id="btn-xray" class="active" onclick="toggleCutaway()">التشريح الداخلي: مفعل</button>
             <button id="btn-smoke" class="active" onclick="toggleSmoke()">خطوط الهواء: مفعلة</button>
         </div>
+
+        <button class="sync-btn" onclick="syncAeroToPhysics()">🔗 ربط المعاملات بمحرك الفيزياء الرئيسي</button>
+        <div id="sync-status"></div>
     </div>
 
-    <!-- الرسم البياني الحي -->
+    <!-- الرسم البياني الحي (Auto-Scale) -->
     <div id="chart-panel">
         <div class="chart-title">
-            <span>REAL-TIME FORCE & VELOCITY GRAPH</span>
-            <span style="color:#00ff88;">Lift / Speed</span>
+            <span>AUTO-SCALE FORCE & SPEED</span>
+            <span id="chart-live-readout" style="color:#00ff88;">L: 0 N | V: 0 m/s</span>
         </div>
-        <canvas id="telemetryChart" width="316" height="130"></canvas>
+        <canvas id="telemetryChart" width="326" height="135"></canvas>
     </div>
 
     <!-- لوحة المعاملات الهوائية (CFD HUD) -->
@@ -154,13 +162,11 @@
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        // الإضاءة
         scene.add(new THREE.AmbientLight(0xffffff, 0.65));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
         dirLight.position.set(20, 40, 25);
         scene.add(dirLight);
 
-        // صندوق نفق الرياح الافتراضي (Wind Tunnel Chamber)
         const tunnelGeo = new THREE.BoxGeometry(60, 26, 32);
         const tunnelEdges = new THREE.EdgesGeometry(tunnelGeo);
         const tunnelBox = new THREE.LineSegments(tunnelEdges, new THREE.LineBasicMaterial({ color: 0x1e3a5f, transparent: true, opacity: 0.6 }));
@@ -170,7 +176,7 @@
         floorGrid.position.y = -13;
         scene.add(floorGrid);
 
-        // 2. بناء مجسمات الطائرات (BWB + Quadrotor) مع المكونات الداخلية (Cutaway)
+        // 2. بناء مجسمات الطائرات
         const vehicleRoot = new THREE.Group();
         scene.add(vehicleRoot);
 
@@ -184,7 +190,6 @@
 
         function buildInternalElectronics(parentGroup, scale = 1.0) {
             const internals = new THREE.Group();
-            // متحكم الطيران (Flight Controller - Pixhawk)
             const fc = new THREE.Mesh(
                 new THREE.BoxGeometry(2.2 * scale, 0.6 * scale, 1.5 * scale),
                 new THREE.MeshPhongMaterial({ color: 0x00ffcc, emissive: 0x004433 })
@@ -192,7 +197,6 @@
             fc.position.set(0.5 * scale, 0.2 * scale, 0);
             internals.add(fc);
 
-            // البطارية (LiPo Battery)
             const bat = new THREE.Mesh(
                 new THREE.BoxGeometry(3.2 * scale, 1.0 * scale, 1.8 * scale),
                 new THREE.MeshPhongMaterial({ color: 0x3b82f6 })
@@ -200,7 +204,6 @@
             bat.position.set(-2.2 * scale, 0.1 * scale, 0);
             internals.add(bat);
 
-            // متحكمات السرعة (ESCs)
             const escMat = new THREE.MeshPhongMaterial({ color: 0xf59e0b });
             [-1.2, 1.2].forEach(zPos => {
                 const esc = new THREE.Mesh(new THREE.BoxGeometry(1.4 * scale, 0.3 * scale, 0.6 * scale), escMat);
@@ -208,7 +211,6 @@
                 internals.add(esc);
             });
 
-            // الكاميرا البصرية الأمامية (EO Camera Gimbal)
             const cam = new THREE.Mesh(
                 new THREE.SphereGeometry(0.85 * scale, 16, 16),
                 new THREE.MeshPhongMaterial({ color: 0x1e293b, shininess: 90 })
@@ -219,7 +221,6 @@
             parentGroup.add(internals);
         }
 
-        // بناء جناح BWB
         function initBWBModel() {
             const wingShape = new THREE.Shape();
             wingShape.moveTo(6, 0);
@@ -253,7 +254,6 @@
             buildInternalElectronics(bwbGroup, 1.0);
         }
 
-        // بناء الدرون الرباعي (960g Quadrotor مثل الصورة الأولى)
         let quadRotors = [];
         function initQuadModel() {
             const bodyGeo = new THREE.BoxGeometry(7.5, 1.8, 2.6);
@@ -269,7 +269,6 @@
             ];
 
             armPositions.forEach(pos => {
-                // الذراع
                 const arm = new THREE.Mesh(
                     new THREE.BoxGeometry(6.5, 0.4, 0.45),
                     new THREE.MeshPhongMaterial({ color: 0x334155 })
@@ -278,7 +277,6 @@
                 arm.rotation.y = Math.atan2(-pos.z, pos.x);
                 quadGroup.add(arm);
 
-                // المحرك والمروحة
                 const rotorDisk = new THREE.Mesh(
                     new THREE.CylinderGeometry(2.6, 2.6, 0.08, 24),
                     new THREE.MeshBasicMaterial({ color: pos.front ? 0x38bdf8 : 0xff4466, transparent: true, opacity: 0.45 })
@@ -294,7 +292,7 @@
         initBWBModel();
         initQuadModel();
 
-        // 3. متجهات القوى ثلاثية الأبعاد (3D Force Arrows)
+        // 3. متجهات القوى ثلاثية الأبعاد
         const liftArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 8, 0x00ff66, 1.5, 0.9);
         const weightArrow = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 0), 7, 0xfacc15, 1.5, 0.9);
         const thrustArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 8, 0x38bdf8, 1.5, 0.9);
@@ -302,7 +300,7 @@
 
         scene.add(liftArrow, weightArrow, thrustArrow, dragArrow);
 
-        // 4. خطوط الدخان الملونة في نفق الرياح (Streamlines |V|/V∞)
+        // 4. خطوط الدخان الملونة في نفق الرياح
         const streamCount = 140;
         const pointsPerStream = 28;
         const streams = [];
@@ -329,7 +327,6 @@
         }
 
         function velocityToColor(ratio, targetColor) {
-            // تدرج لوني من الأزرق (بطيء) إلى الأخضر فالأصفر والأحمر (سريع) مثل الصورة الثانية
             const t = Math.max(0, Math.min(1, ratio / 1.6));
             if (t < 0.25) targetColor.setRGB(0, t * 4, 1);
             else if (t < 0.5) targetColor.setRGB(0, 1, 1 - (t - 0.25) * 4);
@@ -343,7 +340,17 @@
         let smokeEnabled = true;
         const historyLift = [];
         const historySpeed = [];
-        const maxHistory = 100;
+        const maxHistory = 110;
+
+        let latestAeroSnapshot = {
+            cl0: 0.15,
+            cl_alpha: 0.085,
+            cd0: 0.022,
+            induced_k: 0.045,
+            wing_area: 3.2,
+            mass: 45.0,
+            max_thrust: 350.0
+        };
 
         function setVehicleType(type) {
             vehicleType = type;
@@ -351,6 +358,10 @@
             quadGroup.visible = (type === 'QUAD');
             document.getElementById('btn-bwb').classList.toggle('active', type === 'BWB');
             document.getElementById('btn-quad').classList.toggle('active', type === 'QUAD');
+
+            // تصفير سجل الرسم البياني عند التبديل ليبدأ Auto-Scale بدقة
+            historyLift.length = 0;
+            historySpeed.length = 0;
 
             if (type === 'QUAD') {
                 document.getElementById('slider-wind').value = 12;
@@ -379,7 +390,28 @@
             btn.classList.toggle('active', smokeEnabled);
         }
 
-        // 6. حساب الفيزياء وتحديث الشاشة والرسم البياني
+        async function syncAeroToPhysics() {
+            const statusEl = document.getElementById('sync-status');
+            statusEl.style.color = '#38bdf8';
+            statusEl.innerText = 'جاري إرسال المعاملات إلى stealth_bwb_physics.py...';
+
+            try {
+                const response = await fetch('/api/aero-params', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(latestAeroSnapshot)
+                });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const res = await response.json();
+                statusEl.style.color = '#00ff88';
+                statusEl.innerText = `✅ تم الربط بنجاح (CL0=${res.profile.cl0}, CD0=${res.profile.cd0})`;
+            } catch (err) {
+                statusEl.style.color = '#ff4466';
+                statusEl.innerText = '⚠️ شغّل الخادم via localhost:8000/wind-tunnel للمزامنة الحية';
+            }
+        }
+
+        // 6. حساب الفيزياء وتحديث الشاشة والرسم البياني (Auto-Scale)
         const chartCanvas = document.getElementById('telemetryChart');
         const ctx = chartCanvas.getContext('2d');
         const tmpColor = new THREE.Color();
@@ -398,7 +430,6 @@
             const alphaRad = THREE.MathUtils.degToRad(alphaDeg);
             const rollRad = THREE.MathUtils.degToRad(rollDeg);
 
-            // في وضع الدرون الرباعي، الميل للأمام يكون للأسفل (-alpha)، وفي الطائرة للأعلى (+alpha)
             vehicleRoot.rotation.set(rollRad, 0, vehicleType === 'BWB' ? alphaRad : -alphaRad);
 
             const rho = 1.225;
@@ -408,16 +439,30 @@
                 mass = 45.0;
                 wingArea = 3.2;
                 maxThrust = 350.0;
-                cl = 0.15 + 0.085 * alphaDeg;
-                cd = 0.022 + 0.045 * (cl * cl);
+                const cl0 = 0.15;
+                const clAlpha = 0.085;
+                const cd0 = 0.022;
+                const inducedK = 0.045;
+
+                cl = cl0 + clAlpha * alphaDeg;
+                cd = cd0 + inducedK * (cl * cl);
                 const q = 0.5 * rho * windSpeed * windSpeed;
                 liftN = q * wingArea * cl;
                 dragN = q * wingArea * cd;
                 thrustN = throttle * maxThrust;
                 pitchMoment = -0.45 * liftN * Math.sin(alphaRad) - 1.8 * alphaDeg;
                 accelX = (thrustN * Math.cos(alphaRad) - dragN) / mass;
+
+                latestAeroSnapshot = {
+                    cl0: cl0,
+                    cl_alpha: clAlpha,
+                    cd0: cd0,
+                    induced_k: inducedK,
+                    wing_area: wingArea,
+                    mass: mass,
+                    max_thrust: maxThrust
+                };
             } else {
-                // نموذج الدرون 960g (مطابق لمعادلات الصورة الأولى)
                 mass = 0.96;
                 wingArea = 0.18;
                 maxThrust = 16.0;
@@ -429,25 +474,22 @@
                 pitchMoment = -0.14 * (thrustN * Math.sin(alphaRad));
                 accelX = (thrustN * Math.sin(alphaRad) - dragN) / mass;
 
-                // تدوير المراوح
                 quadRotors.forEach((r, idx) => r.rotation.y += (idx % 2 === 0 ? 0.5 : -0.5));
             }
 
             const weightN = mass * 9.81;
 
-            // تحديث لوحة CFD HUD
             document.getElementById('hud-wind').innerText = `${windSpeed.toFixed(1)} m/s - ${Math.round(windSpeed * 3.6)} km/h`;
             document.getElementById('hud-att').innerText = `α ${alphaDeg.toFixed(1)}° • β 0.0° • φ ${rollDeg.toFixed(1)}°`;
             document.getElementById('hud-lift').innerText = `${liftN.toFixed(1)} N • CL ${cl.toFixed(3)}`;
             document.getElementById('hud-drag').innerText = `${dragN.toFixed(1)} N • CD ${cd.toFixed(3)}`;
             document.getElementById('hud-moment').innerText = `${pitchMoment.toFixed(2)} N·m`;
             document.getElementById('hud-accel').innerText = `${accelX >= 0 ? '+' : ''}${accelX.toFixed(2)} m/s²`;
+            document.getElementById('chart-live-readout').innerText = `L: ${liftN.toFixed(1)} N | V: ${windSpeed.toFixed(1)} m/s`;
 
-            // تحديث أطوال واتجاهات أسهم القوى ثلاثية الأبعاد
-            const scaleF = vehicleType === 'BWB' ? 0.022 : 0.75;
+            const scaleF = vehicleType === 'BWB' ? 0.015 : 0.75;
             liftArrow.setLength(Math.max(1.5, Math.min(14, Math.abs(liftN) * scaleF)), 1.4, 0.8);
             liftArrow.setDirection(new THREE.Vector3(0, liftN >= 0 ? 1 : -1, 0));
-
             weightArrow.setLength(Math.max(1.5, Math.min(12, weightN * scaleF)), 1.4, 0.8);
 
             const thrustDir = vehicleType === 'BWB'
@@ -455,10 +497,8 @@
                 : new THREE.Vector3(Math.sin(alphaRad), Math.cos(alphaRad), 0).normalize();
             thrustArrow.setDirection(thrustDir);
             thrustArrow.setLength(Math.max(1.5, Math.min(14, thrustN * scaleF)), 1.4, 0.8);
-
             dragArrow.setLength(Math.max(1.0, Math.min(12, dragN * scaleF)), 1.4, 0.8);
 
-            // تحديث خطوط انسياب الهواء الملونة في نفق الرياح
             if (smokeEnabled && windSpeed > 0.5) {
                 const flowStep = (windSpeed / 45.0) * 0.65;
                 streams.forEach(s => {
@@ -470,7 +510,6 @@
                         const x = 30 - ((s.phase + j * 0.85) % 60);
                         const distToWing = Math.hypot(x, s.y0 * 1.4, s.z0 * 0.7);
                         
-                        // انحراف الهواء حول الجناح وتوليد دوامات خلفية (Wake)
                         let deflectionY = 0;
                         let speedRatio = 1.0;
                         if (distToWing < 12) {
@@ -496,7 +535,6 @@
                 });
             }
 
-            // تحديث الرسم البياني الحي
             historyLift.push(liftN);
             historySpeed.push(windSpeed);
             if (historyLift.length > maxHistory) { historyLift.shift(); historySpeed.shift(); }
@@ -507,31 +545,44 @@
             const w = chartCanvas.width, h = chartCanvas.height;
             ctx.clearRect(0, 0, w, h);
 
+            // ضبط المقياس الرأسي تلقائياً (Auto-Scale) مع هامش علوي 20%
+            const peakLift = historyLift.length > 0 ? Math.max(...historyLift.map(Math.abs)) : 100;
+            const autoMaxL = Math.max(25, peakLift * 1.2);
+            const autoMaxV = 100; // أقصى سرعة رياح 90 m/s + هامش
+
             // خطوط الشبكة الخلفية
             ctx.strokeStyle = '#1e293b';
             ctx.lineWidth = 1;
-            for (let y = 25; y < h; y += 30) {
+            for (let y = 24; y < h; y += 28) {
                 ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
             }
 
-            // منحنى قوة الرفع (أخضر)
-            const maxL = vehicleType === 'BWB' ? 1200 : 25;
+            // كتابة حدود المقياس التلقائي على الرسم البياني
+            ctx.fillStyle = '#64748b';
+            ctx.font = '10px Courier New';
+            ctx.fillText(`MAX SCALE: ${autoMaxL.toFixed(0)} N`, 6, 12);
+            ctx.fillText(`0 N`, 6, h - 5);
+
+            // منحنى قوة الرفع (أخضر - Auto-Scaled)
             ctx.strokeStyle = '#00ff88';
             ctx.lineWidth = 2;
             ctx.beginPath();
             historyLift.forEach((val, i) => {
-                const px = (i / maxHistory) * w;
-                const py = h - Math.max(5, Math.min(h - 5, (val / maxL) * (h - 15)));
+                const px = (i / Math.max(1, maxHistory - 1)) * w;
+                const ratio = Math.max(0, Math.min(1, Math.abs(val) / autoMaxL));
+                const py = (h - 10) - ratio * (h - 26);
                 i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
             });
             ctx.stroke();
 
             // منحنى السرعة (أزرق)
             ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 1.8;
             ctx.beginPath();
             historySpeed.forEach((val, i) => {
-                const px = (i / maxHistory) * w;
-                const py = h - Math.max(5, Math.min(h - 5, (val / 90) * (h - 15)));
+                const px = (i / Math.max(1, maxHistory - 1)) * w;
+                const ratio = Math.max(0, Math.min(1, val / autoMaxV));
+                const py = (h - 10) - ratio * (h - 26);
                 i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
             });
             ctx.stroke();
